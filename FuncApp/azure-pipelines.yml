@@ -1,0 +1,135 @@
+# Starter pipeline
+
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+
+# specific branch build
+trigger:
+  branches:
+    include:
+    - topic/*
+    exclude:
+    - master
+
+
+variables:
+  backendRgName: 'nga-s-weu-terraform-01-rg'
+  backendStName: 'ngasweuterraform01st'
+  backendKey: 'snd.build-test.terraform.tfstate'
+  workingDirectory: 'test'
+
+
+pool:
+  name: Azure Pipelines
+  vmImage: 'ubuntu-16.04'
+
+stages:
+- stage: TestModule
+  displayName: Test Module (CI)
+
+  jobs:
+    - job: TestModule
+      displayName: Test Module
+      steps:
+        - task: InstallSSHKey@0
+          inputs:
+            knownHostsEntry: '|1|pccMP3lsytks6qqzWAUjmz8lMTI=|SxZLEkZmgQTUK/RJC5J5HgRijig= ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC7Hr1oTWqNqOlzGJOfGJ4NakVyIzf1rXYd4d7wo6jBlkLvCA4odBlL0mDUyZ0/QUfTTqeu+tm22gOsv+VrVTMk6vwRU75gY/y9ut5Mb3bR5BV58dKXyq9A9UeB5Cakehn5Zgm6x1mKoVyf+FFn26iYqXJRgzIZZcZ5V6hrE0Qg39kZm4az48o0AUbf6Sp4SLdvnuMa2sVNwHBboS7EJkm57XQPVU3/QpyNLHbWDdzwtrlS+ez30S3AdYhLKEOxAG8weOnyrtLJAUen9mTkol8oII1edf7mWWbWVf0nBmly21+nZcmCTISQBtdcyPaEno7fFQMDD26/s0lfKob4Kw8H'
+            sshPublicKey: 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQD0aX5bU+2SRGxhDGXIDixl/+6jtRU7abcH/BNoapon2D0TvSn9dD3ylWeViMsjo+bqdnUKmC2/knOzIM2mkonE6YyRh3tEfEEFCzLaSUzakYWCoBgNmUCrbGVFcbhx19CrwbB9GCrHFPRKaCpO6kSGKSMv6U+q8ueDLGC0YFSfEeXrhjhc3ftgu+Z0gd8qcw8L4nMxewCl4AgEdh5taB95cWJ8fRe7b7/rMoiYvh2rcqhd0Y2kuQmFNLug8AScRVj4Tb/oc3HrqUpNNY/pMXqBJHijBG+sQ8MXf4gVD6wfCzjB0dz31vO1300/3/oYb52iW68TKR05HfKFUkiSLK5f josevicente.lara@ngahr.com'
+            sshKeySecureFile: 'id_rsa'
+        - task: TerraformInstaller@0
+          displayName: Terraform Install
+          inputs:
+            terraformVersion: '0.12.13'    
+    
+        - task: TerraformCLI@0
+          displayName: Terraform Init
+          inputs:
+            workingDirectory: '$(workingDirectory)'
+            command: 'init'
+            backendType: 'azurerm'
+            backendServiceArm: 'terraform'
+            ensureBackend: true
+            backendAzureRmResourceGroupName: '$(backendRgName)'
+            backendAzureRmResourceGroupLocation: '"West Europe"'
+            backendAzureRmStorageAccountName: '$(backendStName)'
+            backendAzureRmStorageAccountSku: 'Standard_LRS'
+            backendAzureRmContainerName: 'tfstatebackends'
+            backendAzureRmKey: '$(backendKey)'
+
+        - task: TerraformCLI@0
+          displayName: Terraform Validate
+          inputs:
+            command: 'validate'
+            workingDirectory: '$(workingDirectory)'
+
+        - task: TerraformCLI@0
+          inputs:
+            command: 'plan'
+            workingDirectory: '$(workingDirectory)'
+            environmentServiceName: 'terraform'
+            commandOptions: '-detailed-exitcode'
+        - task: TerraformCLI@0
+          inputs:
+            command: 'apply'
+            workingDirectory: '$(workingDirectory)'
+            environmentServiceName: 'terraform'
+            commandOptions: '-auto-approve -input=false'
+
+        - task: terraform-outputs@0
+          inputs:
+            workingDirectory: '$(workingDirectory)'
+            mapSensitiveOutputsAsSecrets: false
+
+- stage: Approval
+  jobs:
+    - deployment: Approve
+      displayName: Approval
+      environment: 'Test-Approval-Build'
+      strategy:
+      # default deployment strategy, more coming...
+        runOnce:
+          deploy:
+            steps:
+            - script: echo Approved $(Build.Repository.Name)
+
+- stage: DestroyTest
+  displayName: Destroy Test (CI)
+
+  jobs:
+    - job: DestroyTest
+      displayName: Destroy Test
+      steps:
+        - task: InstallSSHKey@0
+          inputs:
+            knownHostsEntry: '|1|pccMP3lsytks6qqzWAUjmz8lMTI=|SxZLEkZmgQTUK/RJC5J5HgRijig= ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC7Hr1oTWqNqOlzGJOfGJ4NakVyIzf1rXYd4d7wo6jBlkLvCA4odBlL0mDUyZ0/QUfTTqeu+tm22gOsv+VrVTMk6vwRU75gY/y9ut5Mb3bR5BV58dKXyq9A9UeB5Cakehn5Zgm6x1mKoVyf+FFn26iYqXJRgzIZZcZ5V6hrE0Qg39kZm4az48o0AUbf6Sp4SLdvnuMa2sVNwHBboS7EJkm57XQPVU3/QpyNLHbWDdzwtrlS+ez30S3AdYhLKEOxAG8weOnyrtLJAUen9mTkol8oII1edf7mWWbWVf0nBmly21+nZcmCTISQBtdcyPaEno7fFQMDD26/s0lfKob4Kw8H'
+            sshPublicKey: 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQD0aX5bU+2SRGxhDGXIDixl/+6jtRU7abcH/BNoapon2D0TvSn9dD3ylWeViMsjo+bqdnUKmC2/knOzIM2mkonE6YyRh3tEfEEFCzLaSUzakYWCoBgNmUCrbGVFcbhx19CrwbB9GCrHFPRKaCpO6kSGKSMv6U+q8ueDLGC0YFSfEeXrhjhc3ftgu+Z0gd8qcw8L4nMxewCl4AgEdh5taB95cWJ8fRe7b7/rMoiYvh2rcqhd0Y2kuQmFNLug8AScRVj4Tb/oc3HrqUpNNY/pMXqBJHijBG+sQ8MXf4gVD6wfCzjB0dz31vO1300/3/oYb52iW68TKR05HfKFUkiSLK5f josevicente.lara@ngahr.com'
+            sshKeySecureFile: 'id_rsa'
+
+        - task: TerraformInstaller@0
+          displayName: Terraform Install
+          inputs:
+            terraformVersion: '0.12.13'    
+    
+        - task: TerraformCLI@0
+          displayName: Terraform Init
+          inputs:
+            workingDirectory: '$(workingDirectory)'
+            command: 'init'
+            backendType: 'azurerm'
+            backendServiceArm: 'terraform'
+            ensureBackend: true
+            backendAzureRmResourceGroupName: '$(backendRgName)'
+            backendAzureRmResourceGroupLocation: '"West Europe"'
+            backendAzureRmStorageAccountName: '$(backendStName)'
+            backendAzureRmStorageAccountSku: 'Standard_LRS'
+            backendAzureRmContainerName: 'tfstatebackends'
+            backendAzureRmKey: '$(backendKey)'
+        - task: TerraformCLI@0
+          displayName: Terraform Destroy
+          inputs:
+            command: 'destroy'
+            workingDirectory: '$(workingDirectory)'
+            environmentServiceName: 'terraform'
+          
